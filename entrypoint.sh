@@ -10,7 +10,7 @@ if [ -z "$(ls -A /usr/share/nginx/html/img 2>/dev/null)" ]; then
     rm -rf /tmp/ds
 fi
 
-# 2. Write a bulletproof, AIO-specific Nginx config
+# 2. Write Nginx config with FULL Docker logging enabled
 cat << EOF > /etc/nginx/nginx.conf
 worker_processes auto;
 events {
@@ -23,21 +23,26 @@ http {
     keepalive_timeout 65;
     client_max_body_size ${MEDIA_UPLOAD_MAX:-48m};
 
+    # PUSH ALL LOGS TO THE DOCKER CONSOLE
+    access_log /dev/stdout;
+    error_log /dev/stderr debug;
+
     server {
         listen 80;
         server_name _;
         root /usr/share/nginx/html;
         index index.html;
 
-        # Frontend routes (React Router)
+        # Frontend routes
         location / {
             try_files \$uri \$uri/ /index.html;
         }
 
-        # Backend API routes proxied to the Node server
-        location /api {
-            proxy_pass http://127.0.0.1:3000;
-            proxy_set_header Host \$host;
+        # Backend API routes
+        location /api/ {
+            # The trailing slash here automatically strips '/api' before passing to Node
+            proxy_pass http://127.0.0.1:3000/;
+            proxy_set_header Host \$http_host;
             proxy_set_header X-Real-IP \$remote_addr;
             proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto \$scheme;
@@ -49,5 +54,5 @@ EOF
 # 3. Start Nginx in the background
 nginx -g 'daemon on;'
 
-# 4. Start the Node API
-node server.js
+# 4. Start the Node API in the foreground (exec makes it PID 1 for better logging)
+exec node server.js
