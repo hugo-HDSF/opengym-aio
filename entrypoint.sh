@@ -14,32 +14,50 @@ fi
 ln -sf /dev/stdout /var/log/nginx/access.log
 ln -sf /dev/stderr /var/log/nginx/error.log
 
-# 3. Ensure variables exist for the author's Nginx template
-export RESOLVER=${RESOLVER:-127.0.0.11}
-export CF_CONNECTING_IP=${CF_CONNECTING_IP:-}
-export BASE_PATH=${BASE_PATH:-}
-export MEDIA_UPLOAD_MAX=${MEDIA_UPLOAD_MAX:-48m}
-export BACKEND=127.0.0.1
-export PORT=3000
-export NGINX_PORT=80
+# 3. Write our own bulletproof Nginx config
+cat << EOF > /etc/nginx/nginx.conf
+user root;
+worker_processes auto;
+events {
+    worker_connections 1024;
+}
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    sendfile on;
+    client_max_body_size ${MEDIA_UPLOAD_MAX:-48m};
 
-# 4. Process all Nginx templates (No more guessing the file name!)
-# This finds any file ending in .template and outputs it to http.d/
-for f in /etc/nginx/templates/*.template; do
-    # Extract the filename without the .template extension
-    filename=$(basename "$f" .template)
-    
-    echo "Rendering Nginx template: $f -> /etc/nginx/http.d/$filename"
-    
-    envsubst '${BACKEND} ${PORT} ${NGINX_PORT} ${RESOLVER} ${CF_CONNECTING_IP} ${BASE_PATH} ${MEDIA_UPLOAD_MAX}' \
-        < "$f" \
-        > "/etc/nginx/http.d/$filename"
-done
+    # Push logs to the symlinks
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log warn;
 
-# 5. Start the Node API in the background
+    server {
+        listen 80;
+        server_name _;
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # Frontend routes
+        location / {
+            try_files \$uri \$uri/ /index.html;
+        }
+
+        # Backend API routes (Passing exactly as the API expects)
+        location /api/ {
+            proxy_pass http://127.0.0.1:3000;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+        }
+    }
+}
+EOF
+
+# 4. Start the Node API in the background
 echo "Starting openGym Node API..."
 node server.js &
 
-# 6. Start Nginx in the foreground
+# 5. Start Nginx in the foreground
 echo "Starting Nginx proxy..."
 exec nginx -g 'daemon off;'
