@@ -10,7 +10,12 @@ if [ -z "$(ls -A /usr/share/nginx/html/img 2>/dev/null)" ]; then
     rm -rf /tmp/ds
 fi
 
-# 2. Write Nginx config with FULL Docker logging enabled
+# 2. FORCE Nginx logs to Docker console
+mkdir -p /var/log/nginx
+ln -sf /proc/1/fd/1 /var/log/nginx/access.log
+ln -sf /proc/1/fd/2 /var/log/nginx/error.log
+
+# 3. Write a bulletproof AIO Nginx config
 cat << EOF > /etc/nginx/nginx.conf
 worker_processes auto;
 events {
@@ -23,9 +28,9 @@ http {
     keepalive_timeout 65;
     client_max_body_size ${MEDIA_UPLOAD_MAX:-48m};
 
-    # PUSH ALL LOGS TO THE DOCKER CONSOLE
-    access_log /dev/stdout;
-    error_log /dev/stderr debug;
+    # Logs are now mapped to the symlinks we created
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log debug;
 
     server {
         listen 80;
@@ -33,15 +38,15 @@ http {
         root /usr/share/nginx/html;
         index index.html;
 
-        # Frontend routes
+        # Serve frontend files
         location / {
             try_files \$uri \$uri/ /index.html;
         }
 
-        # Backend API routes
+        # Proxy API requests (stripping the /api prefix just in case Node doesn't expect it)
         location /api/ {
-            # The trailing slash here automatically strips '/api' before passing to Node
-            proxy_pass http://127.0.0.1:3000/;
+            rewrite ^/api/(.*)$ /\$1 break;
+            proxy_pass http://127.0.0.1:3000;
             proxy_set_header Host \$http_host;
             proxy_set_header X-Real-IP \$remote_addr;
             proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -51,8 +56,10 @@ http {
 }
 EOF
 
-# 3. Start Nginx in the background
-nginx -g 'daemon on;'
+# 4. Start the Node API in the background
+echo "Starting Node API..."
+node server.js &
 
-# 4. Start the Node API in the foreground (exec makes it PID 1 for better logging)
-exec node server.js
+# 5. Start Nginx in the foreground (this keeps the container alive and logs flowing)
+echo "Starting Nginx proxy..."
+exec nginx -g 'daemon off;'
