@@ -23,11 +23,18 @@ export BACKEND=127.0.0.1
 export PORT=3000
 export NGINX_PORT=80
 
-# 4. Render the official openGym Nginx template
-# CRITICAL FIX: We output to http.d/ instead of conf.d/ so Alpine loads it correctly.
-envsubst '${BACKEND} ${PORT} ${NGINX_PORT} ${RESOLVER} ${CF_CONNECTING_IP} ${BASE_PATH} ${MEDIA_UPLOAD_MAX}' \
-    < /etc/nginx/templates/default.conf.template \
-    > /etc/nginx/http.d/default.conf
+# 4. Process all Nginx templates (No more guessing the file name!)
+# This finds any file ending in .template and outputs it to http.d/
+for f in /etc/nginx/templates/*.template; do
+    # Extract the filename without the .template extension
+    filename=$(basename "$f" .template)
+    
+    echo "Rendering Nginx template: $f -> /etc/nginx/http.d/$filename"
+    
+    envsubst '${BACKEND} ${PORT} ${NGINX_PORT} ${RESOLVER} ${CF_CONNECTING_IP} ${BASE_PATH} ${MEDIA_UPLOAD_MAX}' \
+        < "$f" \
+        > "/etc/nginx/http.d/$filename"
+done
 
 # 5. Start the Node API in the background
 echo "Starting openGym Node API..."
