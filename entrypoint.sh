@@ -10,20 +10,44 @@ if [ -z "$(ls -A /usr/share/nginx/html/img 2>/dev/null)" ]; then
     rm -rf /tmp/ds
 fi
 
-# 2. Ensure defaults exist so Nginx templates don't break
-export RESOLVER=${RESOLVER:-127.0.0.11}
-export CF_CONNECTING_IP=${CF_CONNECTING_IP:-}
-export BASE_PATH=${BASE_PATH:-}
-export MEDIA_UPLOAD_MAX=${MEDIA_UPLOAD_MAX:-48m}
+# 2. Write a bulletproof, AIO-specific Nginx config
+cat << EOF > /etc/nginx/nginx.conf
+worker_processes auto;
+events {
+    worker_connections 1024;
+}
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    sendfile on;
+    keepalive_timeout 65;
+    client_max_body_size ${MEDIA_UPLOAD_MAX:-48m};
 
-# Ensure configuration directory exists
-mkdir -p /etc/nginx/conf.d
+    server {
+        listen 80;
+        server_name _;
+        root /usr/share/nginx/html;
+        index index.html;
 
-# 3. Render Nginx configuration
-envsubst '${BACKEND} ${PORT} ${NGINX_PORT} ${RESOLVER} ${CF_CONNECTING_IP} ${BASE_PATH} ${MEDIA_UPLOAD_MAX}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
+        # Frontend routes (React Router)
+        location / {
+            try_files \$uri \$uri/ /index.html;
+        }
 
-# 4. Start Nginx in the background
+        # Backend API routes proxied to the Node server
+        location /api/ {
+            proxy_pass http://127.0.0.1:3000;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+        }
+    }
+}
+EOF
+
+# 3. Start Nginx in the background
 nginx -g 'daemon on;'
 
-# 5. Start the Node API (openGym uses server.js)
+# 4. Start the Node API
 node server.js
