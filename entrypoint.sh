@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# 1. Download media if missing (runs once)
+# 1. Download media if missing
 mkdir -p /usr/share/nginx/html/img /usr/share/nginx/html/gif
 if [ -z "$(ls -A /usr/share/nginx/html/img 2>/dev/null)" ]; then
     echo "Downloading exercise media..."
@@ -10,11 +10,17 @@ if [ -z "$(ls -A /usr/share/nginx/html/img 2>/dev/null)" ]; then
     rm -rf /tmp/ds
 fi
 
-# 2. Render Nginx configuration
-envsubst '${BACKEND} ${PORT} ${NGINX_PORT}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
+# 2. Ensure defaults exist so Nginx templates don't break
+export RESOLVER=${RESOLVER:-127.0.0.11}
+export CF_CONNECTING_IP=${CF_CONNECTING_IP:-}
+export BASE_PATH=${BASE_PATH:-}
+export MEDIA_UPLOAD_MAX=${MEDIA_UPLOAD_MAX:-48m}
 
-# 3. Start Nginx in the background
+# 3. Render Nginx configuration with ALL required variables
+envsubst '${BACKEND} ${PORT} ${NGINX_PORT} ${RESOLVER} ${CF_CONNECTING_IP} ${BASE_PATH} ${MEDIA_UPLOAD_MAX}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
+
+# 4. Start Nginx in the background
 nginx -g 'daemon on;'
 
-# 4. Start the Node API in the foreground
+# 5. Start the Node API in the foreground
 npm start || node index.js
