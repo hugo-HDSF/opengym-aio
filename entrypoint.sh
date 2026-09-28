@@ -10,50 +10,29 @@ if [ -z "$(ls -A /usr/share/nginx/html/img 2>/dev/null)" ]; then
     rm -rf /tmp/ds
 fi
 
-# 2. Write a dead-simple, exact-match Nginx config
-cat << EOF > /etc/nginx/nginx.conf
-user root;
-worker_processes auto;
-events {
-    worker_connections 1024;
-}
-http {
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
-    sendfile on;
-    client_max_body_size ${MEDIA_UPLOAD_MAX:-48m};
+# 2. Force Nginx logs to Docker console
+ln -sf /dev/stdout /var/log/nginx/access.log
+ln -sf /dev/stderr /var/log/nginx/error.log
 
-    # Logs will actually print to Portainer/Docker now
-    access_log /dev/stdout;
-    error_log /dev/stderr warn;
+# 3. Ensure variables exist for the author's Nginx template
+export RESOLVER=${RESOLVER:-127.0.0.11}
+export CF_CONNECTING_IP=${CF_CONNECTING_IP:-}
+export BASE_PATH=${BASE_PATH:-}
+export MEDIA_UPLOAD_MAX=${MEDIA_UPLOAD_MAX:-48m}
+export BACKEND=127.0.0.1
+export PORT=3000
+export NGINX_PORT=80
 
-    server {
-        listen 80;
-        server_name _;
-        root /usr/share/nginx/html;
-        index index.html;
+# 4. Render the official openGym Nginx template
+# CRITICAL FIX: We output to http.d/ instead of conf.d/ so Alpine loads it correctly.
+envsubst '${BACKEND} ${PORT} ${NGINX_PORT} ${RESOLVER} ${CF_CONNECTING_IP} ${BASE_PATH} ${MEDIA_UPLOAD_MAX}' \
+    < /etc/nginx/templates/default.conf.template \
+    > /etc/nginx/http.d/default.conf
 
-        # Frontend routes
-        location / {
-            try_files \$uri \$uri/ /index.html;
-        }
-
-        # Backend API routes (Forwarded EXACTLY as they are, no stripping!)
-        location /api/ {
-            proxy_pass http://127.0.0.1:3000;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-        }
-    }
-}
-EOF
-
-# 3. Start the Node API in the background
-echo "Starting Node API..."
+# 5. Start the Node API in the background
+echo "Starting openGym Node API..."
 node server.js &
 
-# 4. Start Nginx in the foreground
+# 6. Start Nginx in the foreground
 echo "Starting Nginx proxy..."
 exec nginx -g 'daemon off;'
