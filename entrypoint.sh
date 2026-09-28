@@ -16,11 +16,14 @@ export CF_CONNECTING_IP=${CF_CONNECTING_IP:-}
 export BASE_PATH=${BASE_PATH:-}
 export MEDIA_UPLOAD_MAX=${MEDIA_UPLOAD_MAX:-48m}
 
-# 3. Render Nginx configuration with ALL required variables
+# Ensure configuration directory exists
+mkdir -p /etc/nginx/conf.d
+
+# 3. Render Nginx configuration
 envsubst '${BACKEND} ${PORT} ${NGINX_PORT} ${RESOLVER} ${CF_CONNECTING_IP} ${BASE_PATH} ${MEDIA_UPLOAD_MAX}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
 
 # 4. Start Nginx in the background
 nginx -g 'daemon on;'
 
-# 5. Start the Node API in the foreground
-npm start || node index.js
+# 5. Start the Node API (openGym uses server.js)
+node server.js
